@@ -1,0 +1,44 @@
+// Prisma Schema for Sawa App
+// Learn more: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// User model for authentication
+model User {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  mobile      String?  @unique // Mobile number with country code (optional)
+  name        String?
+  password    String   // Hashed password
+  profilePhoto String? // Profile photo URL
+  mobileVerified Boolean @default(false)
+  categories  String[]  @default([]) // Selected categories (array of category names)
+  categoriesCompleted Boolean @default(false) // Whether user has completed category selection
+  instagramHandle String? // Instagram username/handle (without @)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("users")
+}
+
+// OTP model for mobile verification
+model Otp {
+  id        String   @id @default(uuid())
+  mobile    String   // Mobile number
+  code      String   // OTP code
+  expiresAt DateTime // Expiration time
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([mobile])
+  @@map("otps")
+}
+
+// Add more models here as your app grows
+// Example: Posts, Comments, etc.

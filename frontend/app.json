@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Sawa_App",
+    "slug": "Sawa_App",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "sawaapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.sawaapp.mobile"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#6B46C1",
+          "image": "./assets/images/Logo for Sawa App.png",
+          "imageWidth": 120,
+          "resizeMode": "contain",
+          "dark": {
+            "backgroundColor": "#6B46C1"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

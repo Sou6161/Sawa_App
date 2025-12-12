@@ -1,0 +1,72 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Frontend (Expo/React Native)
+frontend/.expo/
+frontend/dist/
+frontend/web-build/
+frontend/expo-env.d.ts
+frontend/.metro-health-check*
+
+# Backend
+backend/dist/
+backend/build/
+backend/*.tsbuildinfo
+backend/logs/
+backend/*.log
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Environment variables
+.env
+.env.local
+.env*.local
+.env.production
+.env.development
+
+# Debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+lerna-debug.log*
+
+# macOS
+.DS_Store
+*.pem
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+
+# Generated native folders
+/ios
+/android
+
+# Example/backup folders
+app-example
