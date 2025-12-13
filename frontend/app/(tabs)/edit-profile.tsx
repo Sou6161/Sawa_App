@@ -228,10 +228,19 @@ export default function EditProfileScreen({ onClose }: EditProfileScreenProps = 
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity style={styles.addPhotoButton} onPress={pickImage}>
-              <Ionicons name="camera" size={40} color="#522EE8" />
-              <Text style={styles.addPhotoText}>Add Photo</Text>
-            </TouchableOpacity>
+            <View style={styles.addPhotoButtonContainer}>
+              <TouchableOpacity style={styles.addPhotoButton} onPress={pickImage}>
+                <DefaultAvatar
+                  gender={user?.gender}
+                  size={120}
+                  color="#522EE8"
+                  backgroundColor="#F0F0F0"
+                />
+                <View style={styles.cameraIconOverlay}>
+                  <Ionicons name="camera" size={20} color="#FFFFFF" />
+                </View>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
@@ -363,12 +372,30 @@ const styles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: "#F0F0F0",
+    backgroundColor: "transparent",
     justifyContent: "center",
     alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#E0E0E0",
-    borderStyle: "dashed",
+    position: "relative",
+  },
+  addPhotoButtonContainer: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cameraIconOverlay: {
+    position: "absolute",
+    bottom: 0,
+    right: 0,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#522EE8",
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 3,
+    borderColor: "#FFFFFF",
   },
   addPhotoText: {
     fontSize: 12,

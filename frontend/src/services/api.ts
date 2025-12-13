@@ -170,9 +170,10 @@ class ApiService {
   /**
    * DELETE request
    */
-  async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
+  async delete<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
     return this.request<T>(endpoint, {
       method: "DELETE",
+      ...options,
     });
   }
 

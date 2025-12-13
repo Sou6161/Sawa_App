@@ -15,6 +15,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useAuth } from "../../src/contexts/AuthContext";
 import { otpService } from "../../src/services/otp.service";
+import { Ionicons } from "@expo/vector-icons";
 
 export default function SignUpScreen() {
   const router = useRouter();
@@ -31,6 +32,7 @@ export default function SignUpScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [gender, setGender] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -156,10 +158,15 @@ export default function SignUpScreen() {
       return;
     }
 
+    if (!gender) {
+      Alert.alert("Error", "Please select your gender");
+      return;
+    }
+
     setIsLoading(true);
     try {
       const normalizedMobile = normalizeMobile(mobile);
-      await signUp(email.trim(), password, normalizedMobile, name.trim() || undefined);
+      await signUp(email.trim(), password, normalizedMobile, name.trim() || undefined, gender);
     } catch (error: any) {
       Alert.alert("Sign Up Failed", error.message || "Failed to create account");
     } finally {
@@ -181,7 +188,7 @@ export default function SignUpScreen() {
     setOtp(cleaned);
   };
 
-  const isButtonDisabled = isLoading || !isOTPVerified || !email.trim() || !password.trim() || !confirmPassword.trim();
+  const isButtonDisabled = isLoading || !isOTPVerified || !email.trim() || !password.trim() || !confirmPassword.trim() || !gender;
   const canSendOTP = !isSendingOTP && mobile.trim().length >= 10 && !isOTPVerified;
   const canVerifyOTP = !isVerifyingOTP && otp.length === 6;
 
@@ -317,7 +324,7 @@ export default function SignUpScreen() {
             )}
 
             <View style={styles.inputWrapper}>
-              <Text style={styles.label}>Name (Optional)</Text>
+              <Text style={styles.label}>Name</Text>
               <View style={styles.inputContainer}>
                 <TextInput
                   style={styles.input}
@@ -329,6 +336,66 @@ export default function SignUpScreen() {
                   editable={!isLoading}
                 />
               </View>
+            </View>
+
+            <View style={styles.inputWrapper}>
+              <Text style={styles.label}>Gender *</Text>
+              <View style={styles.genderContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.genderOption,
+                    gender === "male" && styles.genderOptionSelected,
+                  ]}
+                  onPress={() => setGender("male")}
+                  disabled={isLoading}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="male"
+                    size={32}
+                    color={gender === "male" ? "#FFFFFF" : "#522EE8"}
+                  />
+                  <Text
+                    style={[
+                      styles.genderText,
+                      gender === "male" && styles.genderTextSelected,
+                    ]}
+                  >
+                    Male
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.genderOption,
+                    gender === "female" && styles.genderOptionSelected,
+                  ]}
+                  onPress={() => setGender("female")}
+                  disabled={isLoading}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons
+                    name="female"
+                    size={32}
+                    color={gender === "female" ? "#FFFFFF" : "#E91E63"}
+                  />
+                  <Text
+                    style={[
+                      styles.genderText,
+                      gender === "female" && styles.genderTextSelected,
+                    ]}
+                  >
+                    Female
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              {gender && (
+                <View style={styles.warningContainer}>
+                  <Ionicons name="information-circle" size={16} color="#FF9800" />
+                  <Text style={styles.warningText}>
+                    Once selected, gender cannot be changed later
+                  </Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.inputWrapper}>
@@ -677,5 +744,49 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
     color: "#522EE8",
+  },
+  genderContainer: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  genderOption: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FBFBFB",
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: "#F0F0F0",
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  genderOptionSelected: {
+    backgroundColor: "#522EE8",
+    borderColor: "#522EE8",
+  },
+  genderText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#1e1e1e",
+  },
+  genderTextSelected: {
+    color: "#FFFFFF",
+  },
+  warningContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 8,
+    padding: 10,
+    backgroundColor: "#FFF3E0",
+    borderRadius: 8,
+    gap: 6,
+  },
+  warningText: {
+    fontSize: 12,
+    color: "#E65100",
+    fontWeight: "500",
+    flex: 1,
   },
 });

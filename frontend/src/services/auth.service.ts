@@ -12,6 +12,7 @@ export interface SignUpData {
   password: string;
   mobile: string;
   name?: string;
+  gender?: string;
 }
 
 export interface SignInData {
@@ -26,6 +27,7 @@ export interface AuthResponse {
     mobile?: string;
     name?: string;
     profilePhoto?: string;
+    gender?: string;
     categories?: string[];
     categoriesCompleted?: boolean;
     instagramHandle?: string;
@@ -100,6 +102,34 @@ class AuthService {
     return apiService.put(
       `${API_CONFIG.API_PREFIX}/auth/profile`,
       data,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+  }
+
+  /**
+   * Search users by query string
+   */
+  async searchUsers(query: string, token: string, limit: number = 20) {
+    return apiService.get<{ success: boolean; data: any[] }>(
+      `${API_CONFIG.API_PREFIX}/auth/search?query=${encodeURIComponent(query)}&limit=${limit}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+  }
+
+  /**
+   * Get user profile by userId (public profile view)
+   */
+  async getUserProfile(userId: string, token: string) {
+    return apiService.get<{ success: boolean; data: { user: any } }>(
+      `${API_CONFIG.API_PREFIX}/auth/profile/${userId}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,

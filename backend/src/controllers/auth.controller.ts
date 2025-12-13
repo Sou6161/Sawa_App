@@ -10,6 +10,7 @@ import { hashPassword, comparePassword } from "../utils/password";
 import { generateToken } from "../utils/jwt";
 import { AppError } from "../middleware/errorHandler";
 import { normalizeMobileNumber } from "../utils/otp";
+import { generateDefaultAvatar } from "../utils/defaultAvatar";
 
 /**
  * Sign up a new user
@@ -20,10 +21,15 @@ export const signup = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { email, password, name, mobile } = req.body;
+    const { email, password, name, mobile, gender } = req.body;
 
     if (!mobile) {
       throw new AppError("Mobile number is required", 400);
+    }
+
+    // Validate gender if provided
+    if (gender && !["male", "female"].includes(gender.toLowerCase())) {
+      throw new AppError("Gender must be either 'male' or 'female'", 400);
     }
 
     const normalizedMobile = normalizeMobileNumber(mobile);
@@ -64,6 +70,9 @@ export const signup = async (
     // Hash password
     const hashedPassword = await hashPassword(password);
 
+    // Generate default avatar if no profile photo provided
+    const defaultProfilePhoto = generateDefaultAvatar(gender);
+
     // Create user
     const user = await prisma.user.create({
       data: {
@@ -71,6 +80,8 @@ export const signup = async (
         mobile: normalizedMobile,
         password: hashedPassword,
         name: name || undefined,
+        gender: gender ? gender.toLowerCase() : undefined,
+        profilePhoto: defaultProfilePhoto, // Set default avatar automatically
         mobileVerified: true,
       },
       select: {
@@ -79,6 +90,7 @@ export const signup = async (
         mobile: true,
         name: true,
         profilePhoto: true,
+        gender: true,
         categories: true,
         categoriesCompleted: true,
         instagramHandle: true,
@@ -139,6 +151,18 @@ export const signin = async (
       throw new AppError("Invalid email or password", 401);
     }
 
+    // If user has no profile photo, set a default one
+    let profilePhoto = user.profilePhoto;
+    if (!profilePhoto) {
+      const defaultProfilePhoto = generateDefaultAvatar(user.gender);
+      const updatedUser = await prisma.user.update({
+        where: { id: user.id },
+        data: { profilePhoto: defaultProfilePhoto },
+        select: { profilePhoto: true },
+      });
+      profilePhoto = updatedUser.profilePhoto;
+    }
+
     // Generate token
     const token = generateToken({
       userId: user.id,
@@ -152,7 +176,8 @@ export const signin = async (
           id: user.id,
           email: user.email,
           name: user.name,
-          profilePhoto: user.profilePhoto || undefined,
+          profilePhoto: profilePhoto || undefined,
+          gender: user.gender || undefined,
           categories: user.categories || [],
           categoriesCompleted: user.categoriesCompleted || false,
           instagramHandle: user.instagramHandle || undefined,
@@ -182,13 +207,14 @@ export const getProfile = async (
       throw new AppError("User not authenticated", 401);
     }
 
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { id: userId },
       select: {
         id: true,
         email: true,
         name: true,
         profilePhoto: true,
+        gender: true,
         categories: true,
         categoriesCompleted: true,
         instagramHandle: true,
@@ -201,11 +227,181 @@ export const getProfile = async (
       throw new AppError("User not found", 404);
     }
 
+    // If user has no profile photo, set a default one
+    if (!user.profilePhoto) {
+      const defaultProfilePhoto = generateDefaultAvatar(user.gender);
+      user = await prisma.user.update({
+        where: { id: userId },
+        data: { profilePhoto: defaultProfilePhoto },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          profilePhoto: true,
+          gender: true,
+          categories: true,
+          categoriesCompleted: true,
+          instagramHandle: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+    }
+
     res.json({
       success: true,
       data: { user },
     });
   } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Get user profile by ID (public profile view)
+ */
+export const getUserProfile = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      throw new AppError("User ID is required", 400);
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        profilePhoto: true,
+        gender: true,
+        categories: true,
+        instagramHandle: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      throw new AppError("User not found", 404);
+    }
+
+    res.json({
+      success: true,
+      data: { user },
+    });
+  } catch (error: any) {
+    next(error);
+  }
+};
+
+/**
+ * Search users by name, email, or username
+ */
+export const searchUsers = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      throw new AppError("User not authenticated", 401);
+    }
+
+    const { query, limit = 20 } = req.query;
+
+    if (!query || typeof query !== "string" || query.trim().length === 0) {
+      res.json({
+        success: true,
+        data: [],
+      });
+      return;
+    }
+
+    const searchQuery = query.trim().toLowerCase();
+    const searchLimit = Math.min(parseInt(limit as string) || 20, 50); // Max 50 results
+
+    // Search users by name, email, or instagram handle
+    // Exclude the current user
+    const users = await prisma.user.findMany({
+      where: {
+        AND: [
+          { id: { not: userId } }, // Exclude current user
+          {
+            OR: [
+              { name: { contains: searchQuery, mode: "insensitive" } },
+              { email: { contains: searchQuery, mode: "insensitive" } },
+              { instagramHandle: { contains: searchQuery, mode: "insensitive" } },
+            ],
+          },
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        profilePhoto: true,
+        instagramHandle: true,
+        categories: true,
+        createdAt: true,
+        _count: {
+          select: {
+            followers: true,
+            following: true,
+            stories: {
+              where: {
+                expiresAt: { gt: new Date() },
+              },
+            },
+          },
+        },
+      },
+      take: searchLimit,
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    // Check follow status for each user
+    const userIds = users.map((u) => u.id);
+    const followRelations = await prisma.follow.findMany({
+      where: {
+        followerId: userId,
+        followingId: { in: userIds },
+      },
+      select: {
+        followingId: true,
+      },
+    });
+
+    const followingIds = new Set(followRelations.map((f) => f.followingId));
+
+    // Format response with follow status
+    const usersWithFollowStatus = users.map((user) => ({
+      id: user.id,
+      name: user.name || user.email?.split("@")[0] || "User",
+      email: user.email,
+      profilePhoto: user.profilePhoto,
+      instagramHandle: user.instagramHandle,
+      categories: user.categories,
+      gender: user.gender,
+      followersCount: user._count.followers,
+      followingCount: user._count.following,
+      hasActiveStory: user._count.stories > 0,
+      isFollowing: followingIds.has(user.id),
+      createdAt: user.createdAt,
+    }));
+
+    res.json({
+      success: true,
+      data: usersWithFollowStatus,
+    });
+  } catch (error: any) {
     next(error);
   }
 };
@@ -277,6 +473,7 @@ export const saveCategories = async (
         email: true,
         name: true,
         profilePhoto: true,
+        gender: true,
         categories: true,
         categoriesCompleted: true,
         instagramHandle: true,
@@ -364,6 +561,7 @@ export const updateProfile = async (
         email: true,
         name: true,
         profilePhoto: true,
+        gender: true,
         categories: true,
         categoriesCompleted: true,
         instagramHandle: true,

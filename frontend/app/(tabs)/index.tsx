@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { useFocusEffect } from "expo-router";
 import {
   View,
   Text,
@@ -8,11 +9,26 @@ import {
   Dimensions,
   NativeScrollEvent,
   NativeSyntheticEvent,
+  Alert,
+  ActivityIndicator,
+  Modal,
+  TextInput,
+  Share,
+  RefreshControl,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAuth } from "../../src/contexts/AuthContext";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
+import * as ImagePicker from "expo-image-picker";
+import { Image as ExpoImage } from "expo-image";
+import { useAppDispatch, useAppSelector } from "../../src/store/hooks";
+import { uploadStory, loadUserStories, cleanupExpiredStories, deleteStory, likeStory, viewStory, loadNearbyStories, updateUserLocation } from "../../src/store/slices/storiesSlice";
+import StoryViewer from "../../src/components/StoryViewer";
+import StoryUploadLoader from "../../src/components/StoryUploadLoader";
+import * as SecureStore from "expo-secure-store";
+import * as storyService from "../../src/services/story.service";
+import DefaultAvatar from "../../src/components/DefaultAvatar";
 
 const { width } = Dimensions.get("window");
 const CAROUSEL_AUTO_SCROLL_INTERVAL = 4000; // 4 seconds
@@ -41,12 +57,123 @@ const carouselItems = [
 
 export default function HomeScreen() {
   const { user } = useAuth();
+  const dispatch = useAppDispatch();
+  const { userStory, nearbyStories, isLoading: storiesLoading, isLoadingNearby } = useAppSelector((state) => state.stories);
+  
+  // Debug: Log nearby stories state changes
+  useEffect(() => {
+    console.log('📊 Nearby stories state updated:', {
+      count: nearbyStories.length,
+      isLoading: isLoadingNearby,
+      stories: nearbyStories.map(s => ({
+        id: s.id,
+        userId: s.userId,
+        userName: s.userName,
+        distance: (s as any).distance,
+      })),
+    });
+  }, [nearbyStories, isLoadingNearby]);
   const [activeTab, setActiveTab] = useState<"Nearby" | "Following">("Nearby");
+  const [locationPermissionGranted, setLocationPermissionGranted] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [currentCarouselIndex, setCurrentCarouselIndex] = useState(0);
   const [greeting, setGreeting] = useState("Good afternoon,");
+  const [isUploadingStory, setIsUploadingStory] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [showStoryViewer, setShowStoryViewer] = useState(false);
+  const [showLocationInput, setShowLocationInput] = useState(false);
+  const [locationInput, setLocationInput] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
   const carouselScrollViewRef = useRef<ScrollView>(null);
   const autoScrollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isUserScrollingRef = useRef(false);
+  const locationRequestedRef = useRef(false); // Track if location has been requested to prevent infinite loops
+
+  // Request location permission and get user location for nearby stories
+  const requestLocationAndLoadNearby = useCallback(async () => {
+    // Prevent multiple simultaneous requests
+    if (locationRequestedRef.current) {
+      return;
+    }
+    
+    locationRequestedRef.current = true;
+    
+    try {
+      // Request location permissions
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      
+      if (status === "granted") {
+        setLocationPermissionGranted(true);
+        // Get current location
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        const { latitude, longitude } = location.coords;
+        
+        const newLocation = { latitude, longitude };
+        setUserLocation(newLocation);
+        
+        if (__DEV__) {
+          console.log('📍 Got user location:', { latitude, longitude });
+        }
+        
+        // Update user location in backend
+        try {
+          const result = await dispatch(updateUserLocation(newLocation)).unwrap();
+          console.log('✅ User location updated in backend:', {
+            latitude: result.latitude,
+            longitude: result.longitude,
+          });
+        } catch (error: any) {
+          console.error("❌ Failed to update user location:", {
+            error: error.message || error,
+            latitude,
+            longitude,
+          });
+        }
+        
+        // Verify location was saved by checking it from backend
+        try {
+          const token = await SecureStore.getItemAsync('authToken');
+          if (token) {
+            const myLocation = await storyService.getMyLocation(token);
+            console.log('📍 Verified location in database:', {
+              latitude: myLocation.latitude,
+              longitude: myLocation.longitude,
+              locationUpdatedAt: myLocation.locationUpdatedAt,
+              hasActiveStories: myLocation.hasActiveStories,
+            });
+          }
+        } catch (error) {
+          console.error('Failed to verify location:', error);
+        }
+        
+        // Load nearby stories with a larger radius for emulator/testing
+        // Using 1000km for testing to account for different emulator locations
+        // In production, you might want to use 10km
+        const searchRadius = __DEV__ ? 1000 : 10;
+        if (__DEV__) {
+          console.log('🔍 Loading nearby stories with radius:', searchRadius, 'km');
+        }
+        dispatch(loadNearbyStories({ latitude, longitude, radius: searchRadius }));
+      } else {
+        setLocationPermissionGranted(false);
+        Alert.alert(
+          "Location Permission",
+          "Location permission is required to see nearby stories. You can enable it in your device settings.",
+          [{ text: "OK" }]
+        );
+      }
+    } catch (error) {
+      console.error("Error getting location:", error);
+      setLocationPermissionGranted(false);
+    } finally {
+      // Reset after a delay to allow retry if needed
+      setTimeout(() => {
+        locationRequestedRef.current = false;
+      }, 1000);
+    }
+  }, [dispatch]);
 
   // Get greeting based on current time in user's location timezone
   const updateGreeting = useCallback(async () => {
@@ -181,14 +308,303 @@ export default function HomeScreen() {
     };
   }, [startAutoScroll]);
 
-  // Mock data for stories
-  const stories = [
-    { id: 1, type: "your-story", label: "Your Story" },
-    { id: 2, location: "2km, Khalda", image: "building" },
-    { id: 3, location: "3km, Gardens", image: "building" },
-    { id: 4, location: "3km, Dabouq", name: "Café Dam boo SINCE 2003", image: "cafe" },
-    { id: 5, location: "4km", image: "building" },
-  ];
+  // Store location in ref to avoid dependency issues
+  const userLocationRef = useRef<{ latitude: number; longitude: number } | null>(null);
+  const locationPermissionGrantedRef = useRef(false);
+  
+  // Update refs when state changes
+  useEffect(() => {
+    userLocationRef.current = userLocation;
+    locationPermissionGrantedRef.current = locationPermissionGranted;
+  }, [userLocation, locationPermissionGranted]);
+
+  // Load user stories on mount and when screen comes into focus (like Instagram)
+  useFocusEffect(
+    useCallback(() => {
+      if (user) {
+        // Load stories from database when screen is focused (persists across app restarts)
+        console.log('🔄 Loading stories on screen focus...');
+        dispatch(loadUserStories());
+        
+        // Reload nearby stories if location is already available (using ref to avoid dependency issues)
+        const currentLocation = userLocationRef.current;
+        const hasPermission = locationPermissionGrantedRef.current;
+        if (currentLocation && hasPermission) {
+          const searchRadius = __DEV__ ? 1000 : 10;
+          dispatch(loadNearbyStories({ ...currentLocation, radius: searchRadius }));
+        }
+      }
+    }, [user, dispatch])
+  );
+
+  // Initial load and cleanup expired stories on mount
+  useEffect(() => {
+    if (user && !locationRequestedRef.current) {
+      console.log('🔄 Loading stories on mount...');
+      // Load stories immediately when user is available
+      dispatch(loadUserStories()).then((result) => {
+        if (__DEV__) {
+          console.log('📖 Stories loaded result:', result);
+        }
+      });
+      // Cleanup expired stories on mount
+      dispatch(cleanupExpiredStories());
+      
+      // Request location and load nearby stories (only once on mount)
+      requestLocationAndLoadNearby();
+      
+      // Set up interval to cleanup expired stories every hour
+      const cleanupInterval = setInterval(() => {
+        dispatch(cleanupExpiredStories());
+        // Reload stories after cleanup to update UI
+        dispatch(loadUserStories());
+      }, 60 * 60 * 1000); // Every hour
+
+      return () => {
+        clearInterval(cleanupInterval);
+      };
+    }
+  }, [user, dispatch, requestLocationAndLoadNearby]);
+
+  // Handle story upload
+  const handleAddStory = async () => {
+    try {
+      // Request camera roll permissions
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission Required",
+          "Please grant permission to access your photos to upload stories."
+        );
+        return;
+      }
+
+      // Launch image picker
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [9, 16], // Instagram story aspect ratio
+        quality: 0.8,
+        base64: true, // Get base64 for upload
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        const asset = result.assets[0];
+        // Store both URI and base64
+        (global as any).pendingStoryImageUri = asset.uri;
+        (global as any).pendingStoryImageBase64 = asset.base64 
+          ? `data:image/jpeg;base64,${asset.base64}` 
+          : null;
+        setLocationInput("");
+        setShowLocationInput(true);
+      }
+    } catch (error: any) {
+      setIsUploadingStory(false);
+      setUploadProgress(0);
+      Alert.alert("Error", error.message || "Failed to upload story");
+    }
+  };
+
+  // Handle location input confirmation
+  const handleLocationConfirm = async () => {
+    const imageUri = (global as any).pendingStoryImageUri;
+    const imageBase64 = (global as any).pendingStoryImageBase64;
+    if (!imageUri) return;
+
+    const location = locationInput.trim()
+      ? { name: locationInput.trim() }
+      : undefined;
+
+    setShowLocationInput(false);
+    setLocationInput("");
+    (global as any).pendingStoryImageUri = null;
+    (global as any).pendingStoryImageBase64 = null;
+
+    // Start upload with location
+    setIsUploadingStory(true);
+    setUploadProgress(0);
+    await uploadStoryWithProgress(imageUri, location, imageBase64);
+  };
+
+  // Handle location input cancellation
+  const handleLocationCancel = async () => {
+    const imageUri = (global as any).pendingStoryImageUri;
+    const imageBase64 = (global as any).pendingStoryImageBase64;
+    if (!imageUri) {
+      setShowLocationInput(false);
+      setLocationInput("");
+      return;
+    }
+
+    // Upload story without location
+    setShowLocationInput(false);
+    setLocationInput("");
+    (global as any).pendingStoryImageUri = null;
+    (global as any).pendingStoryImageBase64 = null;
+
+    // Start upload without location
+    setIsUploadingStory(true);
+    setUploadProgress(0);
+    await uploadStoryWithProgress(imageUri, undefined, imageBase64);
+  };
+
+  // Helper function to upload story with progress
+  const uploadStoryWithProgress = async (
+    imageUri: string,
+    location?: { name: string; address?: string },
+    imageBase64?: string | null
+  ) => {
+    // Simulate upload progress (in production, this would come from actual upload)
+    const progressInterval = setInterval(() => {
+      setUploadProgress((prev) => {
+        if (prev >= 90) {
+          clearInterval(progressInterval);
+          return 90;
+        }
+        return prev + 10;
+      });
+    }, 200);
+
+    try {
+      // Upload story via Redux (pass base64 if available)
+      await dispatch(uploadStory({ imageUri, location, imageBase64 })).unwrap();
+      setUploadProgress(100);
+      
+      // After uploading story, update location and reload nearby stories
+      // This ensures that when you upload a story, your location is current
+      const currentLocation = userLocationRef.current;
+      const hasPermission = locationPermissionGrantedRef.current;
+      if (hasPermission && currentLocation) {
+        // Update location to ensure it's current
+        try {
+          await dispatch(updateUserLocation(currentLocation)).unwrap();
+          // Reload nearby stories to include your new story for others
+          const searchRadius = __DEV__ ? 1000 : 10;
+          dispatch(loadNearbyStories({ ...currentLocation, radius: searchRadius }));
+        } catch (error) {
+          console.error("Failed to update location after story upload:", error);
+        }
+      } else if (hasPermission) {
+        // Try to get location again if permission is granted but location not set
+        requestLocationAndLoadNearby();
+      }
+
+      // Small delay to show 100% completion
+      setTimeout(() => {
+        setIsUploadingStory(false);
+        setUploadProgress(0);
+        Alert.alert("Success", "Your story has been uploaded!");
+      }, 500);
+    } catch (error: any) {
+      clearInterval(progressInterval);
+      setIsUploadingStory(false);
+      setUploadProgress(0);
+      Alert.alert("Error", error.message || "Failed to upload story");
+    }
+  };
+
+  // Handle viewing story
+  const handleViewStory = async (story?: any) => {
+    const storyToView = story || userStory;
+    if (storyToView) {
+      setShowStoryViewer(true);
+      // Mark story as viewed (only if it's not your own story)
+      // Your own stories don't need to be marked as viewed
+      const isOwnStory = storyToView.userId === user?.id;
+      if (!isOwnStory) {
+        try {
+          await dispatch(viewStory(storyToView.id)).unwrap();
+        } catch (error: any) {
+          // Silently fail - don't show error for view tracking
+          if (__DEV__) {
+            console.log("Note: Could not mark story as viewed:", error?.message || error);
+          }
+        }
+      }
+    }
+  };
+
+  // Handle pull to refresh
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      // Reload user stories
+      await dispatch(loadUserStories()).unwrap();
+      
+      // Reload nearby stories if location is available
+      const currentLocation = userLocationRef.current;
+      const hasPermission = locationPermissionGrantedRef.current;
+      if (currentLocation && hasPermission) {
+        // Get fresh location to ensure it's current (in case emulator location changed)
+        try {
+          const freshLocation = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          const newLocation = {
+            latitude: freshLocation.coords.latitude,
+            longitude: freshLocation.coords.longitude,
+          };
+          console.log('🔄 Refreshing location during pull-to-refresh:', newLocation);
+          await dispatch(updateUserLocation(newLocation)).unwrap();
+          setUserLocation(newLocation);
+          userLocationRef.current = newLocation;
+          const searchRadius = __DEV__ ? 1000 : 10;
+          await dispatch(loadNearbyStories({ ...newLocation, radius: searchRadius })).unwrap();
+        } catch (error: any) {
+          console.error("❌ Failed to update location during refresh:", error);
+          // Fallback to using cached location
+          const searchRadius = __DEV__ ? 1000 : 10;
+          await dispatch(loadNearbyStories({ ...currentLocation, radius: searchRadius })).unwrap();
+        }
+      } else if (hasPermission) {
+        // If permission is granted but location is not set, try to get it again
+        // Temporarily allow location request during refresh
+        locationRequestedRef.current = false;
+        await requestLocationAndLoadNearby();
+      }
+    } catch (error) {
+      console.error("Error refreshing stories:", error);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [dispatch, requestLocationAndLoadNearby]);
+
+  // Handle closing story viewer
+  const handleCloseStoryViewer = () => {
+    setShowStoryViewer(false);
+  };
+
+  // Handle deleting story
+  const handleDeleteStory = async () => {
+    const storyToDelete = userStory;
+    if (!storyToDelete) return;
+
+    Alert.alert(
+      "Delete Story",
+      "Are you sure you want to delete this story?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await dispatch(deleteStory(storyToDelete.id)).unwrap();
+              setShowStoryViewer(false);
+              Alert.alert("Success", "Story deleted successfully!");
+              // Reload stories to update the UI
+              dispatch(loadUserStories());
+            } catch (error: any) {
+              Alert.alert("Error", error.message || "Failed to delete story");
+            }
+          },
+        },
+      ]
+    );
+  };
 
   // Mock data for trending spots
   const trendingSpots = [
@@ -225,7 +641,17 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#522EE8"
+            colors={["#522EE8"]}
+          />
+        }
+      >
         {/* Carousel Header Section */}
         <View style={styles.carouselContainer}>
           <ScrollView
@@ -337,41 +763,133 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Stories Section */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.storiesContainer}
-            contentContainerStyle={styles.storiesContent}
-          >
-            {stories.map((story) => (
-              <View key={story.id} style={styles.storyCard}>
-                {story.type === "your-story" ? (
+          {/* Stories Section - Only show in Nearby tab */}
+          {activeTab === "Nearby" && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.storiesContainer}
+              contentContainerStyle={styles.storiesContent}
+            >
+              {/* Your Story */}
+              <TouchableOpacity
+                style={styles.storyCard}
+                onPress={userStory ? handleViewStory : handleAddStory}
+                disabled={isUploadingStory || storiesLoading}
+                activeOpacity={0.7}
+              >
+                <View style={styles.yourStoryCard}>
+                  <View style={styles.yourStoryAvatar}>
+                    {user?.profilePhoto ? (
+                      <ExpoImage
+                        source={{ uri: user.profilePhoto }}
+                        style={styles.profileImage}
+                        contentFit="cover"
+                      />
+                    ) : (
+                      <DefaultAvatar
+                        gender={user?.gender}
+                        size={60}
+                        color="#522EE8"
+                        backgroundColor="#F0F0F0"
+                      />
+                    )}
+                    {userStory ? (
+                      <View style={styles.storyRing}>
+                        <View style={styles.storyRingInner} />
+                      </View>
+                    ) : (
+                      <View style={styles.addStoryIcon}>
+                        {isUploadingStory ? (
+                          <ActivityIndicator size="small" color="#FFFFFF" />
+                        ) : (
+                          <Ionicons name="add" size={16} color="#FFFFFF" />
+                        )}
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.yourStoryText}>
+                    {userStory ? "Your Story" : "Add Story"}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* Nearby Users' Stories */}
+              {isLoadingNearby ? (
+                <View style={styles.storyCard}>
                   <View style={styles.yourStoryCard}>
                     <View style={styles.yourStoryAvatar}>
-                      <Ionicons name="person" size={30} color="#522EE8" />
-                      <View style={styles.addStoryIcon}>
-                        <Ionicons name="add" size={16} color="#FFFFFF" />
+                      <ActivityIndicator size="small" color="#522EE8" />
+                    </View>
+                    <Text style={styles.yourStoryText}>Loading...</Text>
+                  </View>
+                </View>
+              ) : nearbyStories.length > 0 ? (
+                nearbyStories.map((story) => (
+                  <TouchableOpacity
+                    key={story.id}
+                    style={styles.storyCard}
+                    onPress={() => handleViewStory(story)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.yourStoryCard}>
+                      <View style={styles.yourStoryAvatar}>
+                        {story.userProfilePhoto ? (
+                          <ExpoImage
+                            source={{ uri: story.userProfilePhoto }}
+                            style={styles.profileImage}
+                            contentFit="cover"
+                          />
+                        ) : (
+                          <DefaultAvatar
+                            gender={(story as any).userGender}
+                            size={60}
+                            color="#522EE8"
+                            backgroundColor="#F0F0F0"
+                          />
+                        )}
+                        <View style={styles.storyRing}>
+                          <View style={styles.storyRingInner} />
+                        </View>
                       </View>
-                    </View>
-                    <Text style={styles.yourStoryText}>Your Story</Text>
-                  </View>
-                ) : (
-                  <View style={styles.locationCard}>
-                    <View style={styles.locationImage}>
-                      <Ionicons name="location" size={24} color="#522EE8" />
-                    </View>
-                    {story.name && (
-                      <Text style={styles.locationName} numberOfLines={1}>
-                        {story.name}
+                      <Text style={styles.yourStoryText} numberOfLines={1}>
+                        {story.userName || "User"}
                       </Text>
-                    )}
-                    <Text style={styles.locationDistance}>{story.location}</Text>
+                      {(story as any).distance && (
+                        <Text style={styles.storyDistance}>
+                          {(story as any).distance} km
+                        </Text>
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))
+              ) : locationPermissionGranted ? (
+                <View style={styles.storyCard}>
+                  <View style={styles.yourStoryCard}>
+                    <View style={styles.yourStoryAvatar}>
+                      <Ionicons name="location-outline" size={30} color="#A3A3A3" />
+                    </View>
+                    <Text style={[styles.yourStoryText, { color: "#A3A3A3" }]}>
+                      No nearby stories
+                    </Text>
                   </View>
-                )}
-              </View>
-            ))}
-          </ScrollView>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.storyCard}
+                  onPress={requestLocationAndLoadNearby}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.yourStoryCard}>
+                    <View style={styles.yourStoryAvatar}>
+                      <Ionicons name="location-outline" size={30} color="#522EE8" />
+                    </View>
+                    <Text style={styles.yourStoryText}>Enable Location</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+            </ScrollView>
+          )}
 
           {/* Trending Spots Section */}
           <View style={styles.section}>
@@ -511,6 +1029,106 @@ export default function HomeScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Story Upload Loader */}
+      <StoryUploadLoader
+        visible={isUploadingStory}
+        progress={uploadProgress}
+      />
+
+      {/* Story Viewer */}
+      {(userStory || nearbyStories.length > 0) && (
+        <StoryViewer
+          visible={showStoryViewer}
+          story={userStory || nearbyStories[0] || null}
+          onClose={handleCloseStoryViewer}
+          onNext={() => {
+            // For now, just close since we only have one story
+            // In future, you can add multiple stories support
+            handleCloseStoryViewer();
+          }}
+          onLike={async () => {
+            const currentStory = userStory || nearbyStories[0];
+            if (currentStory) {
+              try {
+                await dispatch(likeStory(currentStory.id)).unwrap();
+              } catch (error: any) {
+                console.error("Failed to like story:", error);
+              }
+            }
+          }}
+          onShare={async () => {
+            try {
+              const currentStory = userStory || nearbyStories[0];
+              if (currentStory) {
+                const shareMessage = `Check out this story from ${currentStory.userName || user?.name || 'Sawa'}!`;
+                await Share.share({
+                  message: shareMessage,
+                  title: 'Share Story',
+                });
+              }
+            } catch (error: any) {
+              Alert.alert("Error", error.message || "Failed to share story");
+            }
+          }}
+          onDelete={userStory ? handleDeleteStory : undefined}
+          onNext={() => {
+            // For nearby stories, navigate to next story
+            if (nearbyStories.length > 1) {
+              const currentIndex = nearbyStories.findIndex(s => s.id === (userStory || nearbyStories[0])?.id);
+              const nextIndex = (currentIndex + 1) % nearbyStories.length;
+              handleViewStory(nearbyStories[nextIndex]);
+            } else {
+              handleCloseStoryViewer();
+            }
+          }}
+        />
+      )}
+
+      {/* Location Input Modal */}
+      <Modal
+        visible={showLocationInput}
+        transparent
+        animationType="slide"
+                onRequestClose={() => {
+                  (global as any).pendingStoryImageUri = null;
+                  (global as any).pendingStoryImageBase64 = null;
+                  handleLocationCancel();
+                }}
+      >
+        <View style={styles.locationModalOverlay}>
+          <View style={styles.locationModalContent}>
+            <Text style={styles.locationModalTitle}>Add Location</Text>
+            <Text style={styles.locationModalSubtitle}>
+              Add a location to your story (optional)
+            </Text>
+            <TextInput
+              style={styles.locationInput}
+              placeholder="Enter location name (e.g., Lulu's Garden)"
+              placeholderTextColor="#A3A3A3"
+              value={locationInput}
+              onChangeText={setLocationInput}
+              autoFocus
+            />
+            <View style={styles.locationModalButtons}>
+              <TouchableOpacity
+                style={[styles.locationModalButton, styles.locationModalButtonCancel]}
+                onPress={handleLocationCancel}
+              >
+                <Text style={styles.locationModalButtonTextCancel}>Skip</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.locationModalButton, styles.locationModalButtonConfirm]}
+                onPress={handleLocationConfirm}
+              >
+                <Text style={styles.locationModalButtonTextConfirm}>
+                  {locationInput.trim() ? "Add" : "Continue"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -739,6 +1357,39 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 8,
     position: "relative",
+    overflow: "hidden",
+  },
+  profileImage: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+  },
+  defaultAvatar: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: "#F0F0F0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  storyRing: {
+    position: "absolute",
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    borderWidth: 3,
+    borderColor: "#522EE8",
+    top: -3,
+    left: -3,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  storyRingInner: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
   },
   addStoryIcon: {
     position: "absolute",
@@ -757,6 +1408,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#1e1e1e",
     fontWeight: "500",
+    textAlign: "center",
+  },
+  storyDistance: {
+    fontSize: 10,
+    color: "#7D7D7D",
+    marginTop: 2,
+    textAlign: "center",
   },
   locationCard: {
     width: 100,
@@ -988,5 +1646,69 @@ const styles = StyleSheet.create({
     borderRightColor: "transparent",
     borderTopColor: "#522EE8",
     marginTop: -2,
+  },
+  locationModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  locationModalContent: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 20,
+    padding: 24,
+    width: "85%",
+    maxWidth: 400,
+  },
+  locationModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#1e1e1e",
+    marginBottom: 8,
+    textAlign: "center",
+  },
+  locationModalSubtitle: {
+    fontSize: 14,
+    color: "#7D7D7D",
+    marginBottom: 16,
+    textAlign: "center",
+  },
+  locationInput: {
+    borderWidth: 2,
+    borderColor: "#F0F0F0",
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: "#1e1e1e",
+    marginBottom: 20,
+    backgroundColor: "#FBFBFB",
+  },
+  locationModalButtons: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  locationModalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  locationModalButtonCancel: {
+    backgroundColor: "#F0F0F0",
+  },
+  locationModalButtonConfirm: {
+    backgroundColor: "#522EE8",
+  },
+  locationModalButtonTextCancel: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#1e1e1e",
+  },
+  locationModalButtonTextConfirm: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#FFFFFF",
   },
 });

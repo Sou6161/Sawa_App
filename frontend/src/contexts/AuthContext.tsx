@@ -14,6 +14,7 @@ interface User {
   email: string;
   name?: string;
   profilePhoto?: string;
+  gender?: string;
   categories?: string[];
   categoriesCompleted?: boolean;
   instagramHandle?: string;
@@ -32,7 +33,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
-  signUp: (email: string, password: string, mobile: string, name?: string) => Promise<void>;
+  signUp: (email: string, password: string, mobile: string, name?: string, gender?: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   checkAuth: () => Promise<void>;
@@ -44,6 +45,27 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const TOKEN_KEY = "auth_token";
 const USER_KEY = "auth_user";
+
+/**
+ * Helper function to store user data without profilePhoto in SecureStore
+ * profilePhoto is too large for SecureStore's 2048 byte limit
+ */
+const storeUserData = async (user: User): Promise<void> => {
+  // Create a copy without profilePhoto to avoid SecureStore size limit
+  const { profilePhoto, ...userWithoutPhoto } = user;
+  await SecureStore.setItemAsync(USER_KEY, JSON.stringify(userWithoutPhoto));
+};
+
+/**
+ * Helper function to load user data from SecureStore
+ */
+const loadUserData = async (): Promise<Omit<User, 'profilePhoto'> | null> => {
+  const stored = await SecureStore.getItemAsync(USER_KEY);
+  if (stored) {
+    return JSON.parse(stored);
+  }
+  return null;
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -64,16 +86,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       setIsLoading(true);
       const storedToken = await SecureStore.getItemAsync(TOKEN_KEY);
-      const storedUser = await SecureStore.getItemAsync(USER_KEY);
+      const storedUser = await loadUserData();
 
       if (storedToken && storedUser) {
         // Verify token is still valid and get fresh user data
         try {
           const profileResponse = await authService.getProfile(storedToken);
           if (profileResponse.success && profileResponse.data) {
-            // Use fresh profile data from server
+            // Use fresh profile data from server (includes profilePhoto)
             const freshUser = profileResponse.data.user;
-            await SecureStore.setItemAsync(USER_KEY, JSON.stringify(freshUser));
+            // Store user data without profilePhoto in SecureStore
+            await storeUserData(freshUser);
             setToken(storedToken);
             setUser(freshUser);
           } else {
@@ -81,7 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const verifyResponse = await authService.verifyToken(storedToken);
             if (verifyResponse.success) {
               setToken(storedToken);
-              setUser(JSON.parse(storedUser));
+              // Use stored user data (without profilePhoto, will be fetched when needed)
+              setUser(storedUser as User);
             } else {
               await clearAuth();
             }
@@ -91,7 +115,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const verifyResponse = await authService.verifyToken(storedToken);
           if (verifyResponse.success) {
             setToken(storedToken);
-            setUser(JSON.parse(storedUser));
+            // Use stored user data (without profilePhoto, will be fetched when needed)
+            setUser(storedUser as User);
           } else {
             await clearAuth();
           }
@@ -124,17 +149,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email: string,
     password: string,
     mobile: string,
-    name?: string
+    name?: string,
+    gender?: string
   ): Promise<void> => {
     try {
-      const response = await authService.signUp({ email, password, mobile, name });
+      const response = await authService.signUp({ email, password, mobile, name, gender });
 
       if (response.success && response.data) {
         const { user: userData, token: authToken } = response.data;
         
-        // Store token and user securely
+        // Store token and user securely (without profilePhoto)
         await SecureStore.setItemAsync(TOKEN_KEY, authToken);
-        await SecureStore.setItemAsync(USER_KEY, JSON.stringify(userData));
+        await storeUserData(userData);
         
         setToken(authToken);
         setUser(userData);
@@ -160,9 +186,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.success && response.data) {
         const { user: userData, token: authToken } = response.data;
         
-        // Store token and user securely
+        // Store token and user securely (without profilePhoto)
         await SecureStore.setItemAsync(TOKEN_KEY, authToken);
-        await SecureStore.setItemAsync(USER_KEY, JSON.stringify(userData));
+        await storeUserData(userData);
         
         setToken(authToken);
         setUser(userData);
@@ -206,7 +232,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.success && response.data) {
         // Update user data
         const updatedUser = { ...user, ...response.data.user };
-        await SecureStore.setItemAsync(USER_KEY, JSON.stringify(updatedUser));
+        // Store user data without profilePhoto in SecureStore
+        await storeUserData(updatedUser);
         setUser(updatedUser);
       } else {
         throw new Error(response.error?.message || "Failed to save categories");
@@ -231,7 +258,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (response.success && response.data) {
         // Update user data
         const updatedUser = { ...user, ...response.data.user };
-        await SecureStore.setItemAsync(USER_KEY, JSON.stringify(updatedUser));
+        // Store user data without profilePhoto in SecureStore
+        await storeUserData(updatedUser);
         setUser(updatedUser);
       } else {
         throw new Error(response.error?.message || "Failed to update profile");

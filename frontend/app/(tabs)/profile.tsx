@@ -9,6 +9,7 @@ import {
   Modal,
   Dimensions,
   TextInput,
+  Share,
 } from "react-native";
 import { useAuth } from "../../src/contexts/AuthContext";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,6 +20,7 @@ import { Image as ExpoImage } from "expo-image";
 import EditProfileScreen from "./edit-profile";
 import * as ImagePicker from "expo-image-picker";
 import { Platform, ActivityIndicator } from "react-native";
+import DefaultAvatar from "../../src/components/DefaultAvatar";
 
 // Category mapping (same as in categories screen)
 const categoryMap: Record<string, string> = {
@@ -139,9 +141,47 @@ export default function ProfileScreen() {
     ]);
   };
 
-  const handleShare = () => {
-    // Implement share functionality
-    Alert.alert("Share Profile", "Share profile functionality coming soon");
+  const handleShare = async () => {
+    try {
+      if (!user) {
+        Alert.alert("Error", "User data not available");
+        return;
+      }
+
+      // Create a shareable profile link using username
+      // Extract username from email or use name
+      const profileUsername = user?.email?.split("@")[0] || user?.name?.toLowerCase().replace(/\s+/g, "") || "profile";
+      const profileLink = `https://sawa.app/profile/${profileUsername}`;
+      
+      // Alternative: Use deep link format (if you have deep linking configured)
+      // const profileLink = `sawa://profile/${profileUsername}`;
+
+      // Create share message similar to Instagram
+      const shareMessage = `Check out ${user?.name || profileUsername}'s profile on Sawa!\n\n${profileLink}`;
+
+      const result = await Share.share({
+        message: shareMessage,
+        title: `Share ${user?.name || profileUsername}'s Profile`,
+        // On iOS, you can also provide a URL
+        ...(Platform.OS === 'ios' && { url: profileLink }),
+      });
+
+      if (result.action === Share.sharedAction) {
+        if (result.activityType) {
+          // Shared with activity type of result.activityType
+          console.log("Shared with activity type:", result.activityType);
+        } else {
+          // Shared
+          console.log("Profile shared successfully");
+        }
+      } else if (result.action === Share.dismissedAction) {
+        // Dismissed
+        console.log("Share dismissed");
+      }
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Failed to share profile");
+      console.error("Share error:", error);
+    }
   };
 
   // Request camera roll permissions
@@ -274,9 +314,12 @@ export default function ProfileScreen() {
                   contentFit="cover"
                 />
               ) : (
-                <View style={styles.profileImage}>
-                  <Ionicons name="person" size={60} color="#522EE8" />
-                </View>
+                <DefaultAvatar
+                  gender={user?.gender}
+                  size={120}
+                  color="#522EE8"
+                  backgroundColor="#F0F0F0"
+                />
               )}
               {/* Camera icon overlay */}
               <View style={styles.cameraIconOverlay}>

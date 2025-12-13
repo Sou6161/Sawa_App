@@ -82,6 +82,19 @@ if (NODE_ENV === "development") {
   console.log(`   POST ${API_PREFIX}/otp/send`);
   console.log(`   POST ${API_PREFIX}/otp/verify`);
   console.log(`   POST ${API_PREFIX}/otp/resend`);
+  console.log(`   POST ${API_PREFIX}/stories`);
+  console.log(`   GET  ${API_PREFIX}/stories`);
+  console.log(`   GET  ${API_PREFIX}/stories/nearby`);
+  console.log(`   POST ${API_PREFIX}/stories/location`);
+  console.log(`   POST ${API_PREFIX}/stories/:storyId/like`);
+  console.log(`   POST ${API_PREFIX}/stories/:storyId/view`);
+  console.log(`   DELETE ${API_PREFIX}/stories/:storyId`);
+  console.log(`   POST ${API_PREFIX}/follow`);
+  console.log(`   DELETE ${API_PREFIX}/follow`);
+  console.log(`   GET  ${API_PREFIX}/follow/check/:userId`);
+  console.log(`   GET  ${API_PREFIX}/follow/stories`);
+  console.log(`   GET  ${API_PREFIX}/follow/followers/:userId`);
+  console.log(`   GET  ${API_PREFIX}/follow/following/:userId`);
 }
 
 // 404 handler

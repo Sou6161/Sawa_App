@@ -18,13 +18,41 @@ model User {
   password    String   // Hashed password
   profilePhoto String? // Profile photo URL
   mobileVerified Boolean @default(false)
+  gender String? // User gender: "male" or "female"
   categories  String[]  @default([]) // Selected categories (array of category names)
   categoriesCompleted Boolean @default(false) // Whether user has completed category selection
   instagramHandle String? // Instagram username/handle (without @)
+  latitude   Float?    // User's current latitude (for nearby features)
+  longitude  Float?    // User's current longitude (for nearby features)
+  locationUpdatedAt DateTime? // When location was last updated
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // Relations
+  stories     Story[]      // Stories created by this user
+  storyLikes  StoryLike[]  // Stories this user has liked
+  storyViews  StoryView[]  // Stories this user has viewed
+  followers   Follow[]     @relation("Follower") // Users who follow this user
+  following   Follow[]     @relation("Following") // Users this user follows
+
   @@map("users")
+}
+
+// Follow model for tracking follower-following relationships
+model Follow {
+  id          String   @id @default(uuid())
+  followerId  String   // User who is following
+  followingId String   // User being followed
+  createdAt   DateTime @default(now())
+
+  // Relations
+  follower    User     @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId]) // Prevent duplicate follows
+  @@index([followerId])
+  @@index([followingId])
+  @@map("follows")
 }
 
 // OTP model for mobile verification
@@ -40,5 +68,60 @@ model Otp {
   @@map("otps")
 }
 
-// Add more models here as your app grows
-// Example: Posts, Comments, etc.
+// Story model for user stories (24-hour content)
+model Story {
+  id          String   @id @default(uuid())
+  userId      String   // User who created the story
+  imageUrl    String   // URL to the story image (stored in cloud storage)
+  location    String?  // Location name (optional)
+  locationAddress String? // Full location address (optional)
+  likesCount  Int      @default(0) // Total number of likes
+  viewsCount  Int      @default(0) // Total number of views
+  expiresAt   DateTime // Story expiration time (24 hours from creation)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  likes       StoryLike[] // Users who liked this story
+  views       StoryView[] // Users who viewed this story
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([createdAt])
+  @@map("stories")
+}
+
+// Story Like model - tracks which users liked which stories
+model StoryLike {
+  id        String   @id @default(uuid())
+  storyId   String
+  userId    String   // User who liked the story
+  createdAt DateTime @default(now())
+
+  // Relations
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, userId]) // Prevent duplicate likes
+  @@index([storyId])
+  @@index([userId])
+  @@map("story_likes")
+}
+
+// Story View model - tracks which users viewed which stories
+model StoryView {
+  id        String   @id @default(uuid())
+  storyId   String
+  userId    String   // User who viewed the story
+  viewedAt  DateTime @default(now())
+
+  // Relations
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, userId]) // Track unique views per user
+  @@index([storyId])
+  @@index([userId])
+  @@map("story_views")
+}
